@@ -1,0 +1,180 @@
+# Alex Bai
+# parse compressed JSON data and export to CSV
+
+import classes
+
+import re
+import parse #Every re object has foo.group() and foo.span()
+import gzip #Every parse object has foo.fixed, foo.named, foo.spans
+import json #json.loads to parse, json.dumps to prettyprint
+import os #just to clear terminal screen
+import csv
+
+def parseEntry(raw):
+	#find the timestamp as a re object
+	reTime = re.search(r"S:[0-9]*::", raw)
+	time = reTime.group()
+
+	#parse out the actual timestamp
+	ts = parse.parse("S:{}::", time).fixed[0]
+	#cut out the timestamp to get pure JSON, and pass it on
+	return parseSession(raw[reTime.span()[1]:], ts)
+
+def parseSession(raw, ts):
+	#magically turn the JSON into a dict
+	dictForm = json.loads(raw)
+
+	#instantiate object to be returned
+	out = classes.Session()
+
+	#set session-level values
+	out.timeStamp = ts
+	out.sessionId = dictForm["id"]
+	if(out.sessionId not in [1168, 1460, 1476, 1477, 1478, 1479, 2122, 2124,\
+		2125, 3069, 3070]):
+		return None
+	out.type = dictForm["type"]
+	out.callsNow = dictForm["CallsNow"]
+
+	#populate and add each VMR
+	if("vmrs" not in dictForm and "Vmrs" not in dictForm): return out
+	for room in dictForm[("vmrs" if "vmrs" in dictForm else "Vmrs")]:
+		newRoom = classes.VMR()
+		newRoom.id = room["id"] if "id" in room else ""
+		newRoom.name = room["name"] if "name" in room else ""
+		newRoom.Alias = room["Alias"] if "Alias" in room else ""
+		newRoom.StartTime = room["StartTime"] if "StartTime" in room else ""
+		newRoom.Presenting = room["Presenting"] if "Presenting" in room else ""
+
+		#populate and add each VMR Participant
+		for part in room["Participants"]:
+			newPart = classes.Participant()
+			newPart.id = part["id"] if "id" in part else ""
+			newPart.name = part["name"] if "name" in part else ""
+			newPart.RemoteAddress = \
+				part["RemoteAddress"] if "RemoteAddress" in part else ""
+			newPart.Protocol = part["Protocol"] if "Protocol" in part else ""
+			newPart.StartTime = part["StartTime"] if "StartTime" in part else ""
+			newPart.Encryption = part["Encryption"] if "Encryption" in part else ""
+			newPart.CallType = part["CallType"] if "Encryption" in part else ""
+			newPart.Presentation = \
+				part["Presentation"] if "Presentation" in part else ""
+			newPart.TxAudio = part["TxAudio"] if  ("TxAudio" in part) else ""
+			newPart.RxAudio = part["RxAudio"] if  ("RxAudio" in part) else ""
+			newPart.TxVideo = part["TxVideo"] if  ("TxVideo" in part) else ""
+			newPart.RxVideo = part["RxVideo"] if  ("RxVideo" in part) else ""
+			newPart.TxPresentation =\
+				part["TxPresentation"] if ("TxPresentation" in part) else ""
+			newPart.RxPresentation =\
+				part["RxPresentation"] if ("RxPresentation" in part) else ""
+			newRoom.Participants.append(newPart)
+		out.vmrs.append(newRoom)
+	return out
+
+
+def writeCSV(data, logNum, directory):
+#now write to csv
+	with open(directory + "CSV/" + "data.csv", "a", newline="") as csvfile:
+		fWriter = csv.writer(csvfile, delimiter=",")
+		#Column Names
+		fWriter.writerow(["Time_Stamp", "System_ID", "VMR_ID", "VMR_Name",\
+			"Participant_ID", "Remote_Address", "Start_Time", "Protocol",\
+			"Encryption", "Call_Type", "Presentation", "TACodec", "TABitRate",\
+			"TAJitter", "TAPacketLoss", "RACodec", "RABitRate", "RAJitter",\
+			"RAPacketLoss", "TVCodec", "TVResolution", "TVFrameRate", "TVBitRate",\
+			"TVJitter", "TVPacketLoss", "RVCodec", "RVResolution", "RVFrameRate",\
+			"RVBitRate", "RVJitter", "RVPacketLoss", "TPCodec", "TPResolution",\
+			"TPFrameRate", "TPBitRate", "TPJitter", "TPPacketLoss", "RPCodec",\
+			"RPResolution", "RPFrameRate", "RPBitRate", "RPJitter", "RPPacketLoss"])
+		for session in data:
+			for room in session.vmrs:
+				for part in room.Participants:
+					txa = part.TxAudio
+					rxa = part.RxAudio
+					txv = part.TxVideo
+					rxv = part.RxVideo
+					txp = part.TxPresentation
+					rxa = part.RxPresentation
+					audios = [txa, rxa]
+					nonAudios = [txv, rxv, txp, rxa]
+					#Array of values to be exported
+					toWrite = [session.timeStamp, session.sessionId,\
+						room.id, room.name, part.id, part.RemoteAddress, part.StartTime,\
+						part.Protocol, part.Encryption, part.CallType, part.Presentation]
+
+					#Unsure if these fields exist
+					for stream in audios:
+						if(len(stream) > 0):
+							toWrite.extend([stream["Codec"] if "Codec" in stream else "",
+								stream["BitRate"] if "BitRate" in stream else "",
+								stream["Jitter"] if "Jitter" in stream else "",
+								stream["PacketLossRate"] if "PacketLossRate" in stream else ""])
+						else:
+							toWrite.extend(["", "", "", ""])
+					for stream in nonAudios:
+						if(len(stream) > 0):
+							toWrite.extend([stream["Codec"] if "Codec" in stream else "",
+								stream["Resolution"] if "Resolution" in stream else "",
+								stream["FrameRate"] if "FrameRate" in stream else "",
+								stream["BitRate"] if "BitRate" in stream else "",
+								stream["Jitter"] if "Jitter" in stream else "",
+								stream["PacketLossRate"] if "PacketLossRate" in stream else ""])
+						else:
+							toWrite.extend(["", "", "", "", "", ""])
+
+					fWriter.writerow(toWrite)
+
+
+
+
+
+
+#wipe terminal screen
+os.system("clear")
+
+#***********************MODIFY THIS TO CHANGE DIRECTORY*************************
+directory = "636"
+bDirectory = os.fsencode(directory + "/")
+if not os.path.exists(directory + "CSV/"):
+	os.makedirs(directory + "CSV/")
+
+for file in os.listdir(bDirectory):
+	filename = os.fsdecode(file)
+	print(filename)
+	if(filename.find(".log.gz") == -1):
+		continue
+	logNum = parse.parse("{}.log.gz", filename).fixed[0]
+	f = gzip.open(directory + "/" + filename, "rt", encoding="utf-8")
+
+	#start parsing
+	data = []
+	for line in f:
+		if(line[:100].find("\"error\"") > -1):
+			#error, put in a blank participant for the csv
+			rip = classes.Session()
+			ripV = classes.VMR()
+			ripV.id = "log file recorded an error"
+			ripP = classes.Participant()
+			ripV.Participants.append(ripP)
+			rip.vmrs.append(ripV)
+			data.append(rip)
+		if(line[0] == "S" and \
+			(line[:100].find("detail-delta") > -1 or\
+			 line[:100].find("detail-key") > -1)):
+			out = parseEntry(line)
+			if(out is not None):
+				data.append(out)
+	f.close()
+	writeCSV(data, logNum, directory)
+
+print("fin")
+
+
+
+
+
+
+
+
+
+
